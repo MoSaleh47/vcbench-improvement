@@ -9,50 +9,13 @@ from tqdm import tqdm
 
 load_dotenv()
 
-# ══════════════════════════════════════════════════════════
-# CONFIG
-# ══════════════════════════════════════════════════════════
-DATASET_PATH = "vcbench_final_public.csv"   # full 4500 rows
+MODEL        = "qwen/qwen3-32b"
 SAMPLE_SIZE  = 120
 RESULTS_FILE = "results.csv"
-MODEL        = "qwen/qwen3-32b"
 SEED         = 42
+DATASET_PATH = "data/vcbench_final_public.csv"
 
-# ══════════════════════════════════════════════════════════
-# LOAD DATA
-# ══════════════════════════════════════════════════════════
-def load_data():
-    print("\n[1/5] Loading VCBench dataset...")
-    df = pd.read_csv(DATASET_PATH)
-
-    print(f"  Total rows   : {len(df)}")
-    print(f"  Success rate : {df['success'].mean():.1%}")
-    print(f"  Columns      : {list(df.columns)}")
-
-    # Use anonymised_prose as input text, success as label
-    df = df[["anonymised_prose", "success", "industry"]].copy()
-    df["success"] = df["success"].astype(int)
-    df = df.dropna(subset=["anonymised_prose"])
-
-    # Stratified val split (mimics the paper's evaluation setup)
-    _, val = train_test_split(
-        df, test_size=0.2, random_state=SEED, stratify=df["success"]
-    )
-
-    if SAMPLE_SIZE and SAMPLE_SIZE < len(val):
-        # Keep class balance in the sample
-        val = val.groupby("success", group_keys=False).apply(
-            lambda x: x.sample(
-                int(round(SAMPLE_SIZE * len(x) / len(val))), random_state=SEED
-            )
-        ).reset_index(drop=True)
-
-    print(f"  Using        : {len(val)} profiles ({val['success'].sum()} successes, {(val['success']==0).sum()} failures)")
-    return val.reset_index(drop=True)
-
-# ══════════════════════════════════════════════════════════
-# PROMPTS
-# ══════════════════════════════════════════════════════════
+# ── PROMPTS ────────────────────────────────────────────────
 EX = """EXAMPLE 1 — FAILURE:
 "This founder leads a startup in the Healthcare Technology industry.
 Education: * BS in Biology (Institution QS rank 350)
@@ -117,17 +80,27 @@ Step 3 - Base rate check (9% threshold):
 Final answer (SUCCESS or FAILURE):"""
 }
 
-# ══════════════════════════════════════════════════════════
-# API
-# ══════════════════════════════════════════════════════════
+# ── DATA ──────────────────────────────────────────────────
+def load_data():
+    print("\n[1/5] Loading VCBench dataset...")
+    df = pd.read_csv(DATASET_PATH)
+    df = df[["anonymised_prose", "success", "industry"]].copy()
+    df["success"] = df["success"].astype(int)
+    df = df.dropna(subset=["anonymised_prose"])
+    _, val = train_test_split(df, test_size=0.2, random_state=SEED, stratify=df["success"])
+    val = val.groupby("success", group_keys=False).apply(
+        lambda x: x.sample(int(round(SAMPLE_SIZE * len(x) / len(val))), random_state=SEED),
+        include_groups=False
+    ).reset_index(drop=True)
+    print(f"  Using: {len(val)} profiles ({val['success'].sum()} successes)")
+    return val
+
+# ── API ───────────────────────────────────────────────────
 def get_client():
     key = os.getenv("GROQ_API_KEY")
     if not key:
-        raise ValueError("Add GROQ_API_KEY to your .env file! Get it free at console.groq.com")
-    return OpenAI(
-        api_key=key,
-        base_url="https://api.groq.com/openai/v1"
-    )
+        raise ValueError("Add GROQ_API_KEY to your .env!")
+    return OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
 
 def predict(client, profile_text, prompt_template, temperature=0.0):
     prompt = prompt_template.format(profile=profile_text)
@@ -143,15 +116,18 @@ def predict(client, profile_text, prompt_template, temperature=0.0):
             hits = re.findall(r'\b(SUCCESS|FAILURE)\b', raw)
             return hits[-1] if hits else "FAILURE"
         except Exception as e:
-            if attempt < 2:
+            err = str(e)
+            if "429" in err:
+                wait = 60
+                print(f"\n  [Rate limit] Waiting {wait}s...")
+                time.sleep(wait)
+            elif attempt < 2:
                 time.sleep(2 ** attempt)
             else:
-                print(f"  [API error] {e} — defaulting to FAILURE")
+                print(f"  [API error] {e}")
                 return "FAILURE"
 
-# ══════════════════════════════════════════════════════════
-# METRICS
-# ══════════════════════════════════════════════════════════
+# ── METRICS ───────────────────────────────────────────────
 def score(y_true, preds):
     yp = [1 if p == "SUCCESS" else 0 for p in preds]
     p  = precision_score(y_true, yp, zero_division=0)
@@ -168,12 +144,31 @@ def log(label, prompt, temp, m, n):
     exists = os.path.exists(RESULTS_FILE)
     with open(RESULTS_FILE, "a", newline="") as f:
         w = csv.DictWriter(f, fieldnames=row.keys())
-        if not exists:
-            w.writeheader()
+        if not exists: w.writeheader()
         w.writerow(row)
+
+# ── CHECKPOINT ────────────────────────────────────────────
+def get_completed():
+    """Read results.csv and return set of already-done experiment labels."""
+    if not os.path.exists(RESULTS_FILE):
+        return set()
+    try:
+        done = pd.read_csv(RESULTS_FILE)
+        # Keep only runs with the right sample size
+        done = done[done["n_total"] == SAMPLE_SIZE]
+        return set(done["experiment"].tolist())
+    except Exception:
+        return set()
 
 def run(client, df, prompt_name, temp, label=None):
     label = label or f"{prompt_name} | T={temp}"
+    completed = get_completed()
+    if label in completed:
+        existing = pd.read_csv(RESULTS_FILE)
+        row = existing[existing["experiment"] == label].iloc[-1]
+        print(f"  {label:40s}  ⏭  SKIPPED (already done — F0.5={row['f05']:.4f})")
+        return row["f05"]
+
     preds = [
         predict(client, str(row["anonymised_prose"]), PROMPTS[prompt_name], temp)
         for _, row in tqdm(df.iterrows(), total=len(df), desc=label, leave=False)
@@ -183,9 +178,7 @@ def run(client, df, prompt_name, temp, label=None):
     log(label, prompt_name, temp, m, len(df))
     return m["f05"]
 
-# ══════════════════════════════════════════════════════════
-# MAIN
-# ══════════════════════════════════════════════════════════
+# ── MAIN ──────────────────────────────────────────────────
 if __name__ == "__main__":
     print("=" * 55)
     print("  VCBench — Samir Adam Mahamat Saleh")
@@ -193,9 +186,8 @@ if __name__ == "__main__":
 
     df     = load_data()
     client = get_client()
-    print(f"\n[2/5] DeepSeek client ready (model: {MODEL})\n")
+    print(f"\n[2/5] Groq client ready (model: {MODEL})\n")
 
-    # ── Phase 1: Compare 4 prompts at T=0.0 ───────────────
     print("[3/5] PHASE 1 — Prompt Strategy Comparison (T=0.0)")
     print("-" * 55)
     scores1 = {}
@@ -205,7 +197,6 @@ if __name__ == "__main__":
     best_prompt = max(scores1, key=scores1.get)
     print(f"\n  ★ Best prompt: '{best_prompt}'  F0.5={scores1[best_prompt]:.4f}")
 
-    # ── Phase 2: Temperature sweep with best prompt ────────
     print(f"\n[4/5] PHASE 2 — Temperature Tuning (prompt='{best_prompt}')")
     print("-" * 55)
     scores2 = {}
@@ -215,20 +206,17 @@ if __name__ == "__main__":
     best_temp = max(scores2, key=scores2.get)
     print(f"\n  ★ Best temperature: T={best_temp}  F0.5={scores2[best_temp]:.4f}")
 
-    # ── Final leaderboard ──────────────────────────────────
     print("\n[5/5] FINAL LEADERBOARD")
     print("=" * 55)
     res = (pd.read_csv(RESULTS_FILE)
-           .drop_duplicates("experiment")
+           .drop_duplicates("experiment", keep="last")
            .sort_values("f05", ascending=False))
     print(res[["experiment","f05","precision","recall","tp","fp","n_total"]].to_string(index=False))
 
     print("\n  ─── Paper baselines ───")
     print("  GPT-4o (paper)        F0.5 = 0.251")
     print("  DeepSeek-V3 (paper)   F0.5 = 0.118")
-    print("  Human VCs (Tier-1)    Precision ≈ 5.5%")
 
     best = res.iloc[0]
-    print(f"\n  🏆 THE BEST: {best['experiment']}")
+    print(f"\n  🏆 YOUR BEST: {best['experiment']}")
     print(f"     F0.5={best['f05']:.4f}  Precision={best['precision']:.4f}  Recall={best['recall']:.4f}")
-    print(f"\n  ✓ Full results → {RESULTS_FILE}")
