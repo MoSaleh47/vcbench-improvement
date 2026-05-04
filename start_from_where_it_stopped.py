@@ -13,7 +13,7 @@ MODEL        = "qwen/qwen3-32b"
 SAMPLE_SIZE  = 120
 RESULTS_FILE = "results.csv"
 SEED         = 42
-DATASET_PATH = "data/vcbench_final_public.csv"
+DATASET_PATH = "vcbench_final_public.csv"
 
 # ── PROMPTS ────────────────────────────────────────────────
 EX = """EXAMPLE 1 — FAILURE:
@@ -84,15 +84,20 @@ Final answer (SUCCESS or FAILURE):"""
 def load_data():
     print("\n[1/5] Loading VCBench dataset...")
     df = pd.read_csv(DATASET_PATH)
-    df = df[["anonymised_prose", "success", "industry"]].copy()
     df["success"] = df["success"].astype(int)
-    df = df.dropna(subset=["anonymised_prose"])
+    df = df[["anonymised_prose", "success", "industry"]].dropna(subset=["anonymised_prose"])
+
     _, val = train_test_split(df, test_size=0.2, random_state=SEED, stratify=df["success"])
-    val = val.groupby("success", group_keys=False).apply(
-        lambda x: x.sample(int(round(SAMPLE_SIZE * len(x) / len(val))), random_state=SEED),
-        include_groups=False
-    ).reset_index(drop=True)
-    print(f"  Using: {len(val)} profiles ({val['success'].sum()} successes)")
+
+    # Stratified sample — fixed approach, no groupby needed
+    n_success = int(round(SAMPLE_SIZE * val["success"].mean()))
+    n_failure = SAMPLE_SIZE - n_success
+
+    success_rows = val[val["success"] == 1].sample(n=n_success, random_state=SEED)
+    failure_rows = val[val["success"] == 0].sample(n=n_failure, random_state=SEED)
+    val = pd.concat([success_rows, failure_rows]).sample(frac=1, random_state=SEED).reset_index(drop=True)
+
+    print(f"  Using: {len(val)} profiles ({val['success'].sum()} successes, {(val['success']==0).sum()} failures)")
     return val
 
 # ── API ───────────────────────────────────────────────────
