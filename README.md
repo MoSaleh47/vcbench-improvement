@@ -77,6 +77,7 @@ Important files:
 - `PAPER_DRAFT_NEURIPS.md`: publication-facing NeurIPS-style paper draft based
   on the latest local experiment progression.
 - `NEURIPS_REVIEW.md`: NeurIPS-style reviewer critique of the current draft.
+- `neurips_latex/`: LaTeX source formatted for the official NeurIPS template.
 
 ## Environment Setup
 

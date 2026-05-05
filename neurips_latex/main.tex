@@ -1,0 +1,348 @@
+\documentclass{article}
+
+% Official template target:
+% https://www.overleaf.com/latex/templates/neurips-2024/tpsbbrdqcmsh
+% Note: as of 2026-05-05, this URL serves the NeurIPS 2026 template and uses
+% neurips_2026.sty. Upload this folder into that Overleaf template, or copy the
+% official neurips_2026.sty from the template into this directory.
+\usepackage{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{array}
+
+\title{Calibration, Not Prompting, Determines Local LLM Utility on VCBench}
+
+\author{%
+  Anonymous Author(s)\\
+  Affiliation\\
+  Address\\
+  \texttt{email}\\
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Venture-capital screening is an imbalanced rare-event prediction problem: only a
+small fraction of founders produce extreme outcomes, while false positives are
+costly because they waste analyst attention and capital. We study this setting
+using VCBench, a benchmark for predicting founder success from anonymized
+pre-founding profiles. Starting from a prompt-engineering baseline over
+Qwen3-32B, we extend the evaluation to local Ollama inference with no-thinking
+Qwen models, including \texttt{qwen3:32b} and the quantized
+\texttt{hf.co/Qwen/Qwen3-30B-A3B-GGUF:Q4\_K\_M}. Our main finding is that prompt
+engineering mostly changes calibration rather than reliably improving
+discrimination. On a 120-profile public validation sample, local
+\texttt{qwen3:32b} Few-Shot reaches $F_{0.5}=0.1932$ by predicting SUCCESS for
+40.8\% of profiles, while local \texttt{qwen3:32b} Vanilla reaches
+$F_{0.5}=0.2174$ with a lower but still high 21.7\% predicted-positive rate. In
+contrast, the optimized Qwen3-30B-A3B GGUF Vanilla run reaches
+$F_{0.5}=0.2632$ with precision 0.5000, but this comes from only two positive
+predictions and one true positive. On the 4,500-profile private/blind file, the
+same GGUF setup predicts SUCCESS for 333 founders (7.4\%), close to the
+benchmark base rate, but labels are unavailable and this is therefore a
+submission-style prediction file rather than a scored result. These results
+suggest that local open-weight LLMs can be made more conservative, but
+small-sample $F_{0.5}$ gains must be interpreted alongside predicted-positive
+rate, trivial baselines, and confidence intervals.
+\end{abstract}
+
+\section{Introduction}
+
+Early-stage venture-capital prediction is difficult because the signal is
+sparse, the labels are noisy, and successful outcomes are rare. A practically
+useful screening model should not merely identify many successful founders; it
+must do so while keeping false positives low enough to reduce the downstream
+review burden. VCBench formalizes this task by asking models to classify
+anonymized founder profiles as SUCCESS or FAILURE, with success defined as
+raising more than \$500M or achieving an IPO/acquisition above \$500M within
+eight years.
+
+The original VCBench framing uses $F_{0.5}$ as the main metric because
+precision is more important than recall in capital allocation. However,
+$F_{0.5}$ alone can hide important behavior. A model that predicts SUCCESS for
+nearly every founder can obtain nonzero recall and a superficially plausible
+$F_{0.5}$ while providing little screening utility. Conversely, a model that
+predicts very few successes can obtain high precision on a small sample while
+missing almost all true positives.
+
+This project began as a prompt-engineering study on Qwen3-32B. The first draft
+framed Few-Shot prompting as nearly closing the gap with larger proprietary
+models. Subsequent analysis showed that this interpretation was too optimistic:
+the apparent gains were driven by overprediction. We therefore revise the
+scientific question from ``Can prompting close the frontier-model gap?'' to
+``How do prompts and local model variants move the precision-recall and
+calibration tradeoff on VCBench?''
+
+This paper reports the latest stage of the work. We evaluate the same prompt
+templates under local Ollama inference, disable Qwen thinking mode to reduce
+latency and uncontrolled reasoning output, and compare two local Qwen settings.
+The core contribution is empirical and methodological: we show that model choice
+and inference settings can shift the predicted-positive rate from extreme
+overprediction toward the benchmark base rate, but the evidence remains
+small-sample and should be judged through calibration diagnostics rather than
+$F_{0.5}$ alone.
+
+\paragraph{Contributions.}
+We make five contributions. First, we provide a reproducible local Ollama
+workflow for VCBench using the same prompt templates as the hosted API
+experiments. Second, we document the effect of no-thinking local Qwen inference
+on runtime and output parsing. Third, we report public 120-sample validation
+results for local \texttt{qwen3:32b} and
+\texttt{hf.co/Qwen/Qwen3-30B-A3B-GGUF:Q4\_K\_M}. Fourth, we report the
+prediction distribution of a 4,500-row private/blind run for the GGUF model,
+while explicitly avoiding unscored private-performance claims. Fifth, we argue
+that predicted-positive rate, trivial baselines, and uncertainty estimates
+should be mandatory for rare-event LLM classification benchmarks.
+
+\section{Related work}
+
+LLMs have recently been applied to financial decision-making, trading agents,
+and future-event forecasting \citep{benhenda2025finrl,xu2025defi,zeng2025futurex,chandak2026future}.
+These applications are vulnerable to look-ahead bias when models use information
+that would not have been available at the decision time
+\citep{benhenda2026lookahead}. VCBench addresses this concern by anonymizing
+founder profiles and restricting inputs to pre-founding information
+\citep{chen2025vcbench}.
+
+The present work is closest to VCBench and live forecasting benchmarks such as
+YCBench \citep{benhenda2026ycbench}. Unlike benchmarks focused primarily on
+frontier-model accuracy, this study emphasizes evaluation pathology under class
+imbalance. The central issue is not whether an LLM can produce a label, but
+whether the label distribution is calibrated enough to provide screening value.
+
+\section{Data and task}
+
+We use the public VCBench split available in this repository:
+\texttt{vcbench\_final\_public.csv}. It contains 4,500 anonymized founder
+profiles with a success rate of about 9\%. Each row includes
+\texttt{anonymised\_prose}, structured background columns, industry, and the
+binary label \texttt{success}.
+
+For public validation, we use the existing script protocol: a stratified 80/20
+split with seed 42, followed by evaluation on a stratified 120-row sample from
+the validation pool. The 120-row sample contains 11 positives and 109 negatives.
+Metrics include $F_{0.5}$, precision, recall, TP, FP, FN, TN, and
+predicted-success count.
+
+We also run predictions on \texttt{vcbench\_final\_private.csv}. The local copy
+used here contains 4,500 rows but no \texttt{success} labels. Therefore, the
+private/blind run is a prediction-generation exercise and not a scored
+evaluation.
+
+\section{Models and inference}
+
+\subsection{Hosted API baseline}
+
+The original experiment used Qwen3-32B through a Groq OpenAI-compatible API.
+That run evaluated four prompt strategies: Vanilla, Chain-of-Thought (CoT),
+Few-Shot, and Hybrid. The earlier draft reported that Few-Shot at temperature
+0.0 achieved held-out $F_{0.5}=0.1028$ with high recall. Later analysis showed
+this result was caused by very high predicted-positive rate and did not clearly
+outperform trivial high-positive baselines.
+
+\subsection{Local Ollama inference}
+
+We added local inference scripts, \texttt{run\_experiments\_ollama.py} and
+\texttt{test\_real\_data\_ollama.py}. The public local runner imports
+\texttt{PROMPTS} directly from \texttt{run\_experiments.py}. The private local
+runner imports \texttt{BEST\_PROMPT} directly from \texttt{test\_real\_data.py}.
+Thus, the local scripts use the same prompt content as the API scripts; only the
+inference backend changes.
+
+Local inference uses Ollama's native chat endpoint at
+\texttt{http://127.0.0.1:11434/api/chat}. We use \texttt{127.0.0.1} rather than
+\texttt{localhost} because it was more reliable in the Windows environment used
+for the experiments.
+
+\subsection{No-thinking mode}
+
+Qwen reasoning models can spend substantial time producing thinking traces.
+During local experiments, this made CoT-style prompts especially slow and made
+some OpenAI-compatible responses return empty assistant content while reasoning
+appeared in a separate field. We therefore use Ollama native chat and disable
+thinking with both the \texttt{/no\_think} control token and the JSON option
+\texttt{\{"think": false\}}. The final label parser extracts the last occurrence
+of SUCCESS or FAILURE from the model output.
+
+\section{Prompt strategies}
+
+The four public prompt strategies are:
+\begin{itemize}
+    \item \textbf{Vanilla}: direct prediction with the success definition, 9\%
+    base-rate warning, and instruction to be conservative.
+    \item \textbf{CoT}: explicit positive-signal, risk-factor, and base-rate
+    reasoning steps.
+    \item \textbf{Few-Shot}: two examples, one failure and one success.
+    \item \textbf{Hybrid}: few-shot examples plus structured reasoning.
+\end{itemize}
+The local full-private script currently uses the same Few-Shot-style
+\texttt{BEST\_PROMPT} as \texttt{test\_real\_data.py}.
+
+\section{Results}
+
+\subsection{Public validation: local Qwen3-32B}
+
+The first local Ollama run used \texttt{qwen3:32b}. Full CoT evaluation was
+stopped because it was too slow locally; one CoT row took about 75 seconds.
+Completed public 120-sample results are shown in Table~\ref{tab:qwen32}.
+
+\begin{table}[t]
+\caption{Public 120-sample validation results for local \texttt{qwen3:32b}. The Vanilla prompt reduced false positives relative to Few-Shot and achieved higher $F_{0.5}$.}
+\label{tab:qwen32}
+\centering
+\begin{tabular}{llrrrrrr}
+\toprule
+Model & Prompt & $T$ & $F_{0.5}$ & Precision & Recall & TP & FP \\
+\midrule
+\texttt{qwen3:32b} & Few-Shot & 0.0 & 0.1932 & 0.1633 & 0.7273 & 8 & 41 \\
+\texttt{qwen3:32b} & Vanilla  & 0.0 & 0.2174 & 0.1923 & 0.4545 & 5 & 21 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The Vanilla prompt outperformed Few-Shot in $F_{0.5}$ because it reduced false
+positives substantially, even though it found fewer true positives.
+
+\subsection{Public validation: local Qwen3-30B-A3B GGUF}
+
+The next local run used
+\texttt{hf.co/Qwen/Qwen3-30B-A3B-GGUF:Q4\_K\_M}. The completed public
+validation row is shown in Table~\ref{tab:qwen30}.
+
+\begin{table}[t]
+\caption{Public 120-sample validation result for local Qwen3-30B-A3B GGUF. The high precision is based on only two positive predictions, so it should be interpreted as a calibration shift rather than a robust performance claim.}
+\label{tab:qwen30}
+\centering
+\begin{tabular}{llrrrrrrrr}
+\toprule
+Model & Prompt & $T$ & $F_{0.5}$ & Precision & Recall & TP & FP & FN & Pred+ \\
+\midrule
+Qwen3-30B-A3B GGUF & Vanilla & 0.0 & 0.2632 & 0.5000 & 0.0909 & 1 & 1 & 10 & 1.7\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This is the highest $F_{0.5}$ observed in the latest local public sample, but
+it should be interpreted carefully. The result depends on only two positive
+predictions and one true positive. It is evidence of a conservative calibration
+shift, not yet evidence of robust superiority.
+
+\subsection{Private/blind prediction distribution}
+
+The full private/blind file contains 4,500 profiles and no labels. The local
+GGUF run produced the prediction distribution in Table~\ref{tab:private_dist}.
+
+\begin{table}[t]
+\caption{Prediction distribution on the 4,500-row private/blind file. Labels are unavailable, so this is not a scored result.}
+\label{tab:private_dist}
+\centering
+\begin{tabular}{lrr}
+\toprule
+Prediction & Count & Rate \\
+\midrule
+SUCCESS & 333  & 7.4\% \\
+FAILURE & 4167 & 92.6\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This distribution is close to the public benchmark base rate of about 9\%.
+However, without labels, we cannot compute $F_{0.5}$, precision, recall, or
+compare against official private baselines.
+
+\section{Discussion}
+
+The latest results support three conclusions. First, prompt engineering alone is
+not the main story. The same family of prompts can produce very different
+predicted-positive rates depending on model backend, quantization, and inference
+settings. This makes calibration diagnostics essential.
+
+Second, no-thinking local inference is practically important. It reduces
+uncontrolled reasoning output and makes local evaluation more feasible. It also
+prevents a mismatch where the model spends the token budget on reasoning while
+returning no usable classification content.
+
+Third, the GGUF model appears more conservative than the earlier local
+\texttt{qwen3:32b} setting. This is promising for VC screening because extreme
+overprediction is harmful. But conservatism can also become underprediction: the
+public validation row recalls only 1 of 11 successes. A useful system must
+balance this tradeoff across larger samples.
+
+\section{Limitations}
+
+The public validation results are based on a 120-row sample. The strongest GGUF
+public result has only one true positive and one false positive. CoT and Hybrid
+were not fully rerun under the latest local GGUF setup because local reasoning
+prompts were too slow for practical iteration. The private/blind predictions are
+unscored because labels are unavailable. The study has not yet evaluated
+multiple seeds, confidence intervals, or full public-split bootstrap estimates.
+Finally, the structured-feature ML baselines discussed in the earlier draft need
+to be fully reproduced and included in the repository before they can support a
+publication claim.
+
+\section{Broader impact}
+
+Automated VC screening can reinforce existing inequities if models over-weight
+prestige signals such as elite universities, prior big-tech employment, or
+geographic access to startup ecosystems. Even anonymized profiles can retain
+strong socioeconomic proxies. The present work should therefore be interpreted
+as benchmark research, not as a deployable investment system. Any deployment
+would require fairness audits, human oversight, calibration monitoring, and a
+clear policy that model outputs are decision support rather than automated
+funding decisions.
+
+\section{Conclusion}
+
+The latest experiments shift the paper's conclusion from ``prompt engineering
+can make open-weight LLMs competitive on VCBench'' to a more defensible claim:
+calibration determines whether local LLMs are useful for rare-event VC
+screening. Local no-thinking Qwen inference can move predictions from severe
+overprediction toward much more conservative behavior, and the current GGUF
+private/blind run predicts SUCCESS at a rate close to the public base rate.
+However, the evidence is not yet strong enough for a final performance claim.
+
+For a NeurIPS-quality submission, the next required step is a larger and more
+statistically grounded evaluation: full public split or repeated stratified
+splits, trivial baselines in every table, confidence intervals, and a fully
+reproducible structured-ML baseline. With those additions, the work could be a
+credible negative-result and evaluation-methodology paper for LLMs on
+imbalanced, high-stakes prediction tasks.
+
+\begin{ack}
+This draft was prepared from local VCBench experiments and documentation in the
+associated repository. No external funding or competing interests are declared
+in this draft version.
+\end{ack}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\appendix
+
+\section{Reproducibility details}
+
+Code for local inference is provided in \texttt{run\_experiments\_ollama.py} and
+\texttt{test\_real\_data\_ollama.py}. Public validation uses
+\texttt{vcbench\_final\_public.csv}. The private/blind prediction run uses
+\texttt{vcbench\_final\_private.csv}. The current local model is
+\texttt{hf.co/Qwen/Qwen3-30B-A3B-GGUF:Q4\_K\_M}. The inference backend is the
+Ollama native chat endpoint, with no-thinking controls \texttt{/no\_think} and
+\texttt{think: false}. The public validation sample size is 120, with 11
+positives, using seed 42.
+
+\newpage
+\input{checklist.tex}
+
+\end{document}

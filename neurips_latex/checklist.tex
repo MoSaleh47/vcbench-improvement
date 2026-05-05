@@ -1,0 +1,127 @@
+\section*{NeurIPS Paper Checklist}
+
+\begin{enumerate}
+\item \textbf{Claims}
+
+Question: Do the main claims made in the abstract and introduction accurately
+reflect the paper's contributions and scope?
+
+Answer: \answerYes{}.
+
+Justification: The abstract and introduction state that the work is a
+small-sample calibration study and explicitly avoid claiming scored private-set
+performance.
+
+\item \textbf{Limitations}
+
+Question: Does the paper discuss the limitations of the work?
+
+Answer: \answerYes{}.
+
+Justification: Section 8 discusses sample size, unscored private predictions,
+missing confidence intervals, incomplete CoT/Hybrid reruns, and incomplete
+structured-feature baselines.
+
+\item \textbf{Theory assumptions and proofs}
+
+Question: For each theoretical result, does the paper provide the full set of
+assumptions and a complete proof?
+
+Answer: \answerNA{}.
+
+Justification: The paper is empirical and does not present new theoretical
+results or proofs.
+
+\item \textbf{Experimental reproducibility}
+
+Question: Does the paper fully disclose the information needed to reproduce the
+main experimental results?
+
+Answer: \answerYes{}.
+
+Justification: The paper reports datasets, scripts, model identifiers, sample
+size, seed, prompts, Ollama endpoint, and no-thinking controls. The repository
+contains the corresponding code and result CSVs.
+
+\item \textbf{Open access to data and code}
+
+Question: Does the paper provide open access to the data and code, with
+sufficient instructions to reproduce the results?
+
+Answer: \answerYes{}.
+
+Justification: The public data and scripts are in the repository. The
+private/blind file is used only for prediction generation and is not presented as
+a scored benchmark.
+
+\item \textbf{Experimental setting details}
+
+Question: Does the paper specify all training and evaluation details needed to
+understand the results?
+
+Answer: \answerYes{}.
+
+Justification: Sections 3--6 describe the split, sample size, model identifiers,
+prompt strategies, decoding setup, output parser, and metrics.
+
+\item \textbf{Statistical significance}
+
+Question: Does the paper report uncertainty estimates or statistical
+significance where appropriate?
+
+Answer: \answerNo{}.
+
+Justification: The paper explicitly identifies missing confidence intervals and
+multi-seed evaluation as a limitation and next required step.
+
+\item \textbf{Datasets}
+
+Question: Does the paper describe the dataset characteristics and any relevant
+privacy or licensing constraints?
+
+Answer: \answerYes{}.
+
+Justification: Section 3 describes the public and private/blind VCBench files,
+the 9\% class imbalance, the missing private labels, and the anonymized founder
+profile setting.
+
+\item \textbf{Compute resources}
+
+Question: Does the paper report the compute resources used?
+
+Answer: \answerNo{}.
+
+Justification: The current draft reports local Ollama inference and qualitative
+runtime observations, but it does not yet include hardware specifications. This
+should be added before submission.
+
+\item \textbf{Broader impacts}
+
+Question: Does the paper discuss both potential positive and negative societal
+impacts?
+
+Answer: \answerYes{}.
+
+Justification: Section 9 discusses deployment risks, fairness concerns, prestige
+proxies, and the need for human oversight in VC screening.
+
+\item \textbf{Safeguards}
+
+Question: Does the paper describe safeguards for responsible use where relevant?
+
+Answer: \answerYes{}.
+
+Justification: The paper frames the system as benchmark research, not a
+deployment-ready screening system, and recommends fairness audits, calibration
+monitoring, and human oversight.
+
+\item \textbf{Licenses for existing assets}
+
+Question: Are licenses for existing assets such as code, data, and models
+identified where possible?
+
+Answer: \answerNo{}.
+
+Justification: The draft names the model and benchmark files, but model and
+dataset license information should be verified and added before submission.
+\end{enumerate}
