@@ -1,14 +1,31 @@
-.gitignore
+# Secrets
 .env
+
+# Python environments and caches
 /venv/
 /.venv/
 /.pip-cache/
 /.tmp/
 /.uv-cache/
-__pycache__
-vanilla_llm_testing_results/
+__pycache__/
+*.py[cod]
+
+# Local/private data
 vcbench_final_private.csv
-results_ollama_qwen3_30b_a3b_q4_k_m_private_full_20260504_234903.csv
-results_ollama_qwen3_30b_a3b_q4_k_m_private_full.csv
-results_ollama_qwen3_30b_a3b_q4_k_m_public_120.csv
 results_private_test.csv
+results_ollama_qwen3_30b_a3b_q4_k_m_private_full.csv
+results_ollama_qwen3_30b_a3b_q4_k_m_private_full_*.csv
+
+# Generated or local-only experiment folders
+vanilla_llm_testing_results/
+neurips_latex/
+
+# LaTeX build byproducts
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz

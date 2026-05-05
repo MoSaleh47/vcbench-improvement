@@ -1,193 +1,100 @@
-# NeurIPS-Style Review of the VCBench Draft
+# Final Review and Submission Readiness Notes
 
-Draft reviewed: `VC_Bench-2.pdf`
+This is the final internal review for the VCBench local LLM project after the
+repo cleanup and analysis pass.
 
-Context draft used for comparison: `VC_Bench-1.pdf`
+## Executive Summary
 
-Review rubric sources:
+The project is now coherent as a workshop-style benchmark-analysis paper. The
+strongest scientific contribution is the diagnosis of a failure mode: on a
+severely imbalanced VC prediction task, prompt-engineered LLMs can look
+reasonable under `F0.5` while providing poor screening utility because they
+predict `SUCCESS` far too often.
 
-- NeurIPS 2015 evaluation criteria:
-  https://neurips.cc/Conferences/2015/PaperInformation/EvaluationCriteria
-- NeurIPS 2025 reviewer guidelines:
-  https://neurips.cc/Conferences/2025/ReviewerGuidelines
+The final framing is stronger than the original positive-result story. The
+paper should not claim that Qwen prompting closes the gap with frontier models.
+It should claim that calibration diagnostics are mandatory for interpreting LLM
+results on imbalanced, high-stakes classification tasks.
 
-## Summary
+## What Improved
 
-The paper studies prompt engineering for Qwen3-32B on VCBench, an imbalanced
-founder-success classification benchmark. It evaluates four prompting strategies
-(`vanilla`, `cot`, `few_shot`, and `hybrid`) and a temperature sweep. The key
-claim is negative: the best prompt-engineered LLM configuration achieves a
-held-out F0.5 of 0.1028, but this is below trivial high-positive-rate baselines
-such as Always-SUCCESS and below the DeepSeek-V3 result reported by the VCBench
-paper. The paper argues that prompt engineering primarily shifts the
-precision-recall tradeoff toward harmful overprediction and that F0.5 should be
-reported with predicted-positive rate and trivial baselines on rare-event tasks.
+- The title and paper draft now focus on failure modes and calibration.
+- The final README separates code, data, results, and paper artifacts.
+- The LaTeX folder is ignored and excluded from the final repository package.
+- The final analysis includes trivial all-`FAILURE` and all-`SUCCESS` baselines.
+- Bootstrap `F0.5` intervals and Wilson precision intervals are included in
+  `bootstrap_ci_results.csv`.
+- A precision-recall figure is included as `pr_curve.pdf` and `pr_curve.png`.
+- The public GGUF Vanilla result is no longer conflated with the private
+  Few-Shot-style prompt.
+- The private/blind output is correctly described as unscored.
 
-The revised draft is substantially stronger than the earlier `VC_Bench-1.pdf`.
-The earlier draft framed the same result as nearly closing the gap with
-DeepSeek-V3, while the current draft more honestly shows that the high recall is
-mostly caused by near-universal SUCCESS predictions. This reframing is the main
-scientific value of the work.
+## Final Evidence
 
-## Strengths
+### LLM Operating Points
 
-- The paper identifies a practically important failure mode: prompt-engineered
-  LLMs can achieve superficially plausible F0.5 scores while providing almost no
-  useful screening because they predict SUCCESS for most examples.
-- Reporting predicted-positive rate is a strong addition. In the validation
-  table, the best Few-Shot prompt predicts SUCCESS for 94.2% of profiles, which
-  makes the reported recall much easier to interpret.
-- The comparison against Always-SUCCESS, Always-FAILURE, random base-rate, and
-  random matched-rate baselines is exactly the right instinct for a severely
-  imbalanced benchmark.
-- The negative-result framing is significant for applied ML: the paper does not
-  just say "our prompt did poorly"; it argues that metric reporting can obscure
-  non-discriminative behavior.
-- The broader-impact discussion correctly flags prestige bias and the risk of
-  automating VC screening without fairness audits.
-- Including structured-feature ML baselines is promising because it challenges
-  the assumption that LLM prompting is the right tool for this task.
+| Model | Prompt | F0.5 | Precision | Recall | TP | FP | Pred+ |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `qwen3:32b` | Few-Shot | 0.1932 | 0.1633 | 0.7273 | 8 | 41 | 40.8% |
+| `qwen3:32b` | Vanilla | 0.2174 | 0.1923 | 0.4545 | 5 | 21 | 21.7% |
+| Qwen3-30B-A3B GGUF | Vanilla | 0.2632 | 0.5000 | 0.0909 | 1 | 1 | 1.7% |
 
-## Weaknesses
+The GGUF row is more conservative, but it is based on only two positive
+predictions. It is a calibration signal, not a robust model-ranking result.
 
-### Quality
+### Baseline Context
 
-The experimental evidence is suggestive but not yet strong enough for a NeurIPS
-main-track claim. The validation set has only 120 examples and roughly 11
-positive labels, so small changes in TP/FP counts can visibly move F0.5. The
-paper acknowledges this limitation, but the main claims would be much stronger
-with confidence intervals, bootstrapping, and multiple random seeds.
+| System | Split | F0.5 [95% CI] | Precision [Wilson CI] | Recall | PPR |
+| --- | --- | ---: | ---: | ---: | ---: |
+| All-SUCCESS | 120-sample | 0.1120 [0.0515, 0.1807] | 0.0917 [0.0520, 0.1567] | 1.0000 | 100.0% |
+| LR-TF-IDF | 120-sample | 0.7143 [0.3125, 0.9091] | 0.8333 [0.4365, 0.9699] | 0.4545 | 5.0% |
+| GGUF Q4_K_M Vanilla | 120-sample | 0.2632 [0.0000, 0.6250] | 0.5000 [0.0945, 0.9055] | 0.0909 | 1.7% |
 
-The held-out test construction is also confusing. The draft says prompt tuning
-uses a 20% validation pool and final evaluation samples a disjoint `n=200` from
-the 80% training pool. This is technically disjoint from prompt tuning, but
-calling it a "held-out test set" may mislead readers because it is still drawn
-from the public split and not the official private VCBench evaluation. I would
-call it an "internal public test split" unless the official private labels are
-used.
+The LR-TF-IDF baseline is useful because it shows that simple structured
+evaluation can dominate hard-label LLM points on the sampled split. It should be
+presented carefully because the 120-sample result has a wide confidence
+interval.
 
-The structured ML baselines are under-specified. The paper reports that logistic
-regression, random forest, and gradient boosting reach F0.5 of 0.14-0.21 on a
-900-example split, but it does not provide enough details to reproduce the
-features, hyperparameters, train/test protocol, or exact per-model table. Since
-this comparison is important to the paper's conclusion, it needs a full table
-and enough implementation detail to be auditable.
+## Recommended Submission Position
 
-The model setup needs to be frozen. The draft says Qwen3-32B via Groq API, while
-the current repository also contains local Ollama runs for
-`hf.co/Qwen/Qwen3-30B-A3B-GGUF:Q4_K_M`. These should not be mixed. If the paper
-is about Qwen3-32B via Groq, keep all tables and claims tied to that setting. If
-the newer local GGUF results are used, the draft should explicitly identify the
-model, quantization, Ollama version, and no-thinking settings.
+### Workshop Paper: Reasonable
 
-### Clarity
+This version can work as a workshop or class-project submission if the claim is
+kept modest:
 
-The main narrative is clear and much improved over the first draft. The title,
-abstract, and conclusion all align around the same message: prompt engineering
-does not solve the imbalanced classification problem and can hide
-overprediction.
+> We audit local LLM behavior on VCBench and show that calibration, not prompt
+> wording alone, determines whether the model has screening utility under severe
+> class imbalance.
 
-However, the draft has several presentation issues that would hurt a NeurIPS
-review:
+### NeurIPS Main Track: Not Ready
 
-- Some citations are malformed, e.g. "VC context et al. [2025a]" and "VCBench
-  et al. [2025a]".
-- The references mix author names and "et al." placeholders in a way that makes
-  related work look unfinished.
-- Tables extracted from the PDF are dense and hard to read; they should include
-  all key counts, especially `FN`, `TN`, and `Pred+ Rate`, consistently.
-- The term "trivial high-positive-rate baselines" should be defined before it
-  appears in the abstract, or rephrased for readers who have not yet seen the
-  baseline section.
+The current evidence is not enough for a NeurIPS main-track claim. A main-track
+version would still need:
 
-### Significance
+- Full public validation evaluation or repeated stratified splits.
+- Row-level saved predictions for every model/prompt.
+- Stronger structured baselines with locked feature pipelines.
+- Confidence intervals for every headline metric.
+- Hardware, Ollama version, and model artifact metadata.
+- Clear comparison to official VCBench reference systems.
+- Expanded fairness and responsible-use discussion.
 
-The paper addresses a real and difficult applied ML problem: rare-event
-prediction under severe class imbalance in a high-stakes financial setting. The
-most significant contribution is not a new algorithm, but an evaluation insight:
-LLM benchmark results on imbalanced tasks can look meaningful unless compared
-to simple baselines and predicted-positive rates.
+## Remaining Risks
 
-This is aligned with NeurIPS application-paper criteria: the task is real,
-difficult, and practically relevant. The work would be more significant if the
-authors showed that the overprediction failure generalizes across multiple
-open-weight models, not only Qwen3-32B.
+- The LLM confidence intervals are reconstructed from summary counts, not
+  original row-level predictions.
+- The private/blind file has no labels, so the 333/4,500 `SUCCESS` count cannot
+  be scored.
+- The local GGUF and `qwen3:32b` settings should never be collapsed into one
+  "Qwen" result.
+- The hosted Groq scripts and local Ollama scripts use related but distinct
+  inference stacks.
+- The final project contains some legacy scripts retained for reproducibility;
+  the README identifies the main path to use.
 
-### Originality
+## Final Recommendation
 
-The individual components are not novel: prompt engineering, temperature
-ablation, F0.5, and trivial baselines are standard. The originality lies in
-applying these checks to VCBench and exposing the gap between nominal F0.5 and
-practical screening usefulness. That is a valid contribution, especially as a
-negative empirical study, but the current evidence base is narrow.
-
-## Questions for the Authors
-
-1. Can you evaluate the best prompts over the full public split, or at least over
-   multiple stratified splits with confidence intervals? With only 11 positives
-   in the validation sample, the current ranking of prompts may be unstable.
-
-2. Can you clarify the final test protocol? Is the `n=200` final test an
-   internal public split, the official private set, or something else? Please
-   avoid calling it "strict held-out" unless it is fully separated from all
-   development decisions.
-
-3. Can you provide a complete structured-baseline table with exact features,
-   hyperparameters, train/test split, class weighting, and confidence intervals?
-   These baselines are central to the claim that classical ML is currently more
-   useful than prompting.
-
-4. Can you add a calibration analysis beyond predicted-positive rate, such as
-   thresholded logits/probabilities if available, self-reported confidence
-   calibration, or a selective-classification curve? The paper's diagnosis is
-   calibration-related, so a calibration plot would strengthen it.
-
-5. Can you separate results for hosted Qwen3-32B from local quantized Qwen runs?
-   A reviewer needs to know exactly which model, quantization, inference server,
-   and thinking/no-thinking mode generated each table.
-
-Clear criteria that would raise my score: full-split or multi-seed results,
-reproducible ML baselines, corrected split terminology, and one additional
-open-weight model showing the same overprediction pattern.
-
-Clear criteria that would lower my score: if the structured baselines cannot be
-reproduced, if the final test is not actually disjoint from prompt selection, or
-if the trivial-baseline comparison changes materially under a larger evaluation.
-
-## Limitations and Broader Impact
-
-The draft includes a useful limitations section and a reasonable broader-impact
-section. I would not flag the paper for ethics review on the basis of the text
-alone, but I would ask the authors to expand the fairness discussion. In
-particular, the paper should say which protected or proxy attributes are absent,
-which proxies remain in the data, and why prestige-based features can produce
-unequal access to funding even when demographic variables are removed.
-
-The draft should also be explicit that the system is not deployment-ready. The
-current results are better interpreted as a benchmark audit than as an automated
-investment tool.
-
-## NeurIPS Scores
-
-- Quality: 2 / 4 (fair)
-- Clarity: 3 / 4 (good)
-- Significance: 3 / 4 (good)
-- Originality: 3 / 4 (good)
-- Overall: 3 / 6 (borderline reject)
-- Confidence: 3 / 5 (fairly confident)
-
-## Overall Recommendation
-
-Borderline reject in its current form, but with a clear path to borderline
-accept or accept.
-
-The paper has a good core idea and the revised framing is much more credible
-than the earlier positive-results framing. The main blocker is experimental
-strength: NeurIPS reviewers will likely want larger evaluations, uncertainty
-estimates, better reproducibility for the structured baselines, and precise
-separation between public validation, internal test, and private/blind
-prediction.
-
-If the authors address those issues, the work could become a valuable negative
-result and evaluation-methodology paper for LLMs on imbalanced, high-stakes
-classification tasks.
+Submit the work as a compact negative-result/evaluation-methodology paper. Lead
+with the calibration failure mode, not with the best `F0.5` row. The project is
+now much more honest and much more useful because it shows how easy it is to
+misread LLM performance on an imbalanced financial benchmark.

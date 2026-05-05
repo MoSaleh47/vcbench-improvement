@@ -1,5 +1,7 @@
 pandas
 numpy
+scipy
+matplotlib
 pydantic
 pydantic-settings
 openai

@@ -1,405 +1,254 @@
-# VCBench Local LLM Experiments
+# VCBench Local LLM Calibration Study
 
-This repository contains experiments for evaluating large language models on
-VCBench, a venture-capital founder success prediction benchmark. The task is to
-read an anonymized founder profile and predict one binary label:
+This repository is the final project package for a VCBench experiment on local
+LLMs, rare-event prediction, and calibration failure modes in venture-capital
+screening.
 
-- `SUCCESS`: the founder's company raised more than $500M, or had an IPO or
-  acquisition above $500M within eight years.
+VCBench asks a model to read an anonymized founder profile and predict one
+binary label:
+
+- `SUCCESS`: the founder's company raised more than `$500M`, or had an IPO or
+  acquisition above `$500M` within eight years.
 - `FAILURE`: the company did not reach one of those outcomes.
 
-The public VCBench split is highly imbalanced, with about a 9% success rate.
-For that reason, the main metric is `F0.5`, which weights precision more than
-recall. This matches the venture-capital setting where false positives are
-expensive: a model that marks too many weak founders as successes is not useful
-as a screening tool.
+The public split has an approximately 9% success rate. Because the task is
+highly imbalanced, the final analysis treats `F0.5` as necessary but not
+sufficient: every model result should be read together with precision, recall,
+confusion-matrix counts, predicted-positive rate, trivial baselines, and
+uncertainty intervals.
 
-## What We Did
+## Final Takeaway
 
-The original starter kit was extended into a local LLM experimentation workflow.
-The main additions are:
+The strongest result is not "prompt engineering solves VCBench." The defensible
+claim is:
 
-- Prompt engineering experiments over four prompt styles:
-  `vanilla`, `cot`, `few_shot`, and `hybrid`.
-- Local Ollama inference so experiments can run without sending founder data to
-  hosted APIs.
-- Support for Qwen models served by Ollama, including:
-  `qwen3:32b` and `hf.co/Qwen/Qwen3-30B-A3B-GGUF:Q4_K_M`.
-- No-thinking inference for Qwen models using both Ollama's `think: false`
-  option and the `/no_think` control token.
-- Separate result CSVs for public validation runs and private/blind prediction
-  runs.
-- A Pandas 3-compatible fix to the stratified public sampler in
-  `run_experiments.py`.
+> Local open-weight LLMs can be pushed from severe overprediction toward more
+> conservative behavior, but small-sample `F0.5` gains are unstable unless they
+> are interpreted with calibration diagnostics and baselines.
 
-The current local default model is:
-
-```text
-hf.co/Qwen/Qwen3-30B-A3B-GGUF:Q4_K_M
-```
-
-This model was chosen after the first local `qwen3:32b` run was slow,
-especially on chain-of-thought prompts.
+The final project is best positioned as a workshop-style negative result and
+evaluation-methodology study, not as a NeurIPS main-track performance claim.
 
 ## Repository Layout
 
 ```text
 .
+|-- README.md
+|-- PAPER_DRAFT_NEURIPS.md
+|-- NEURIPS_REVIEW.md
+|-- requirements.txt
+|-- .env.example
 |-- run_experiments.py
 |-- run_experiments_ollama.py
 |-- test_real_data.py
 |-- test_real_data_ollama.py
-|-- evaluation.py
+|-- compute_bootstrap_cis.py
+|-- generate_pr_curve.py
 |-- data.py
+|-- evaluation.py
+|-- bootstrap_ci_results.csv
+|-- bootstrap_ci_results.tex
+|-- pr_curve.pdf
+|-- pr_curve.png
 |-- vcbench_final_public.csv
-|-- vcbench_final_private.csv
-|-- results*.csv
-|-- requirements.txt
-|-- README.md
+|-- vcbench_public.csv
+|-- vcbench_final_public_sample100.csv
+|-- results.csv
+|-- results_test.csv
+|-- results_ollama_qwen3_32b_public_120.csv
+|-- results_ollama_qwen3_30b_a3b_q4_k_m_public_120.csv
+|-- core/
+|-- llms/
 ```
 
-Important files:
+The `neurips_latex/` directory is ignored and intentionally excluded from the
+final repository package. The final paper text is kept in
+`PAPER_DRAFT_NEURIPS.md`.
 
-- `run_experiments.py`: original public-split experiment script using the Groq
-  OpenAI-compatible API. It defines the canonical prompt templates used by the
-  local wrapper.
-- `run_experiments_ollama.py`: local Ollama version of the public experiment
-  runner. It imports the same prompts from `run_experiments.py`.
-- `test_real_data.py`: original private/blind prediction script using the Groq
-  API.
-- `test_real_data_ollama.py`: local Ollama version for full private/blind
-  prediction. It imports the same `BEST_PROMPT` from `test_real_data.py`.
-- `requirements.txt`: Python dependencies for the project.
-- `results_ollama_qwen3_30b_a3b_q4_k_m_public_120.csv`: public 120-sample
-  validation result for the current local GGUF model.
-- `results_ollama_qwen3_30b_a3b_q4_k_m_private_full.csv`: full private/blind
-  predictions for the current local GGUF model.
-- `PAPER_DRAFT_NEURIPS.md`: publication-facing NeurIPS-style paper draft based
-  on the latest local experiment progression.
-- `NEURIPS_REVIEW.md`: NeurIPS-style reviewer critique of the current draft.
-- `neurips_latex/`: LaTeX source formatted for the official NeurIPS template.
+Private data, full private prediction files, virtual environments, caches, and
+local secrets are ignored by git.
 
-## Environment Setup
+## Setup
 
-The original `venv/` in this workspace was broken because it pointed to a
-Python executable that no longer existed. A fresh project-local `.venv/` was
-created and ignored by git.
-
-Install dependencies:
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-If creating the environment from scratch:
+Create and activate a local environment:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-The project uses:
+For hosted API scripts, copy `.env.example` to `.env` and fill the relevant
+key. The local Ollama scripts do not require an API key.
 
-- `pandas`
-- `numpy`
-- `scikit-learn`
-- `openai`
-- `httpx`
-- `python-dotenv`
-- `tqdm`
-- `pydantic`
-- `pydantic-settings`
+```text
+OPENAI_API_KEY=your_openai_key_here
+GROQ_API_KEY=your_groq_key_here
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+```
 
-## Ollama Setup
+## Ollama Model
 
-Install and run Ollama, then pull the current default model:
+The final local model used for the latest Ollama runs is:
+
+```text
+hf.co/Qwen/Qwen3-30B-A3B-GGUF:Q4_K_M
+```
+
+Pull it with:
 
 ```powershell
 ollama pull hf.co/Qwen/Qwen3-30B-A3B-GGUF:Q4_K_M
 ```
 
-Check installed models:
+The local scripts use `http://127.0.0.1:11434`, which was more reliable than
+`localhost` in the Windows environment used for this project.
+
+For Qwen reasoning models, the Ollama wrappers force no-thinking mode with both
+`/no_think` and the JSON option `think: false`.
+
+## Main Scripts
+
+- `run_experiments.py`: original hosted Groq/OpenAI-compatible public
+  validation runner. It defines the canonical prompt templates.
+- `run_experiments_ollama.py`: local Ollama public validation runner. It imports
+  the same prompt templates from `run_experiments.py`.
+- `test_real_data.py`: original hosted private/blind prediction runner.
+- `test_real_data_ollama.py`: local Ollama private/blind prediction runner. It
+  imports the same `BEST_PROMPT` from `test_real_data.py`.
+- `compute_bootstrap_cis.py`: computes trivial baselines, LR-TF-IDF baselines,
+  bootstrap `F0.5` intervals, and Wilson intervals.
+- `generate_pr_curve.py`: generates the final precision-recall figure.
+- `data.py`: prints quick dataset/result summaries.
+- `evaluation.py`: evaluates legacy JSON-style outputs from
+  `vanilla_llm_testing_results/` when that directory exists.
+
+## Reproduce Final Analysis Artifacts
+
+Recompute the bootstrap and Wilson interval table:
 
 ```powershell
-ollama list
+.\.venv\Scripts\python.exe compute_bootstrap_cis.py
 ```
 
-The local scripts use:
+Outputs:
 
-```text
-http://127.0.0.1:11434
+- `bootstrap_ci_results.csv`
+- `bootstrap_ci_results.tex`
+
+Regenerate the precision-recall figure:
+
+```powershell
+.\.venv\Scripts\python.exe generate_pr_curve.py
 ```
 
-instead of `localhost`, because `127.0.0.1` worked reliably in this Windows
-environment while `localhost` sometimes produced connection errors.
+Outputs:
 
-## Prompt Templates
+- `pr_curve.pdf`
+- `pr_curve.png`
 
-The Ollama public runner uses exactly the same prompt templates as
-`run_experiments.py`:
+## Run Local Public Validation
 
-- `vanilla`: direct zero-shot prediction with the 9% base-rate warning.
-- `cot`: structured reasoning over positive signals, risks, and base-rate
-  check.
-- `few_shot`: two in-context examples, one failure and one success.
-- `hybrid`: few-shot examples plus structured reasoning.
-
-`test_real_data_ollama.py` uses the same private-test prompt as
-`test_real_data.py`, because it imports `BEST_PROMPT` directly from that file.
-
-For Qwen models, the local wrappers prepend:
-
-```text
-/no_think
-```
-
-and also send:
-
-```json
-{"think": false}
-```
-
-to the Ollama native chat endpoint. This keeps the runs in no-thinking mode and
-prevents the model from spending most of its token budget on hidden or explicit
-reasoning text.
-
-## Running Public Experiments
-
-Fast public validation run with only the `vanilla` prompt:
+Fast public validation run with the current local model and only the Vanilla
+prompt:
 
 ```powershell
 .\.venv\Scripts\python.exe run_experiments_ollama.py --sample-size 120 --prompts vanilla --skip-temp-sweep
 ```
 
-Run the same prompt used by the private script:
+Run the private-script prompt on the public sample:
 
 ```powershell
 .\.venv\Scripts\python.exe run_experiments_ollama.py --sample-size 120 --prompts few_shot --skip-temp-sweep
 ```
 
-Run all prompt strategies, but skip the temperature sweep:
+Full local prompt comparison:
 
 ```powershell
 .\.venv\Scripts\python.exe run_experiments_ollama.py --sample-size 120 --prompts vanilla,cot,few_shot,hybrid --skip-temp-sweep
 ```
 
-Run the full original public experiment, including prompt comparison and
-temperature tuning:
+`cot` and `hybrid` can be very slow on large local Qwen models.
 
-```powershell
-.\.venv\Scripts\python.exe run_experiments_ollama.py --sample-size 120
-```
+## Run Private/Blind Predictions
 
-Warning: `cot` and `hybrid` can be very slow on large local Qwen models. In one
-run, a `cot` row took more than a minute. For practical iteration, use
-`--prompts vanilla --skip-temp-sweep` first.
-
-## Running Private/Blind Predictions
-
-Run the full private/blind dataset with the local default Ollama model:
+The full private/blind CSV is intentionally ignored by git. If it exists locally,
+run:
 
 ```powershell
 .\.venv\Scripts\python.exe test_real_data_ollama.py --sample-size 0
 ```
 
-The output defaults to:
+The private file used in this workspace had 4,500 rows and no `success` column,
+so the output is a prediction file rather than a scored benchmark result.
 
-```text
-results_ollama_qwen3_30b_a3b_q4_k_m_private_full.csv
-```
+## Final Results
 
-If a file with that name already exists, `test_real_data_ollama.py` automatically
-adds a timestamp to avoid overwriting it.
+### Public 120-Sample LLM Runs
 
-Run a small private smoke test:
+| Model | Prompt | T | F0.5 | Precision | Recall | TP | FP | Pred+ |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `qwen3:32b` | Few-Shot | 0.0 | 0.1932 | 0.1633 | 0.7273 | 8 | 41 | 40.8% |
+| `qwen3:32b` | Vanilla | 0.0 | 0.2174 | 0.1923 | 0.4545 | 5 | 21 | 21.7% |
+| Qwen3-30B-A3B GGUF | Vanilla | 0.0 | 0.2632 | 0.5000 | 0.0909 | 1 | 1 | 1.7% |
 
-```powershell
-.\.venv\Scripts\python.exe test_real_data_ollama.py --sample-size 20 --results-file smoke_private_ollama.csv
-```
+The GGUF Vanilla result has the best observed `F0.5` among the local LLM rows,
+but it is based on only two positive predictions. Its Wilson 95% precision
+interval is wide: `0.0945` to `0.9055`.
 
-## Hosted API Scripts
+### Baselines and Confidence Intervals
 
-The original scripts still exist:
+From `bootstrap_ci_results.csv`:
 
-```powershell
-.\.venv\Scripts\python.exe run_experiments.py
-.\.venv\Scripts\python.exe test_real_data.py
-```
+| System | Split | F0.5 [95% CI] | Precision [Wilson CI] | Recall | PPR |
+| --- | --- | ---: | ---: | ---: | ---: |
+| All-FAILURE | 120-sample | 0.0000 [0.0000, 0.0000] | 0.0000 [0.0000, 1.0000] | 0.0000 | 0.0% |
+| All-SUCCESS | 120-sample | 0.1120 [0.0515, 0.1807] | 0.0917 [0.0520, 0.1567] | 1.0000 | 100.0% |
+| LR-TF-IDF | 120-sample | 0.7143 [0.3125, 0.9091] | 0.8333 [0.4365, 0.9699] | 0.4545 | 5.0% |
+| qwen3:32b Few-Shot | 120-sample | 0.1932 [0.0794, 0.3125] | 0.1633 [0.0851, 0.2904] | 0.7273 | 40.8% |
+| qwen3:32b Vanilla | 120-sample | 0.2174 [0.0556, 0.3884] | 0.1923 [0.0851, 0.3788] | 0.4545 | 21.7% |
+| GGUF Q4_K_M Vanilla | 120-sample | 0.2632 [0.0000, 0.6250] | 0.5000 [0.0945, 0.9055] | 0.0909 | 1.7% |
 
-Those scripts expect `GROQ_API_KEY` in `.env` and call:
+The LR-TF-IDF baseline is useful as a sanity check, but the 120-sample number is
+still high-variance and should not be sold as a final leaderboard result.
 
-```text
-https://api.groq.com/openai/v1
-```
+### Private/Blind Prediction Distribution
 
-The local Ollama scripts do not require an API key.
-
-## Current Results
-
-### Qwen3-32B via local Ollama
-
-File:
-
-```text
-results_ollama_qwen3_32b_public_120.csv
-```
-
-Rows currently recorded:
-
-| Prompt | Temperature | F0.5 | Precision | Recall | TP | FP | Total |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| few_shot | 0.0 | 0.1932 | 0.1633 | 0.7273 | 8 | 41 | 120 |
-| vanilla | 0.0 | 0.2174 | 0.1923 | 0.4545 | 5 | 21 | 120 |
-
-The `cot` run was stopped because it was too slow locally.
-
-### Qwen3-30B-A3B GGUF via local Ollama
-
-File:
-
-```text
-results_ollama_qwen3_30b_a3b_q4_k_m_public_120.csv
-```
-
-Rows currently recorded:
-
-| Prompt | Temperature | F0.5 | Precision | Recall | TP | FP | Total |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| vanilla | 0.0 | 0.2632 | 0.5000 | 0.0909 | 1 | 1 | 120 |
-
-This run is much more conservative than the earlier `qwen3:32b` run. It only
-predicted two successes in the 120-profile validation sample.
-
-### Private/Blind Predictions
-
-File:
-
-```text
-results_ollama_qwen3_30b_a3b_q4_k_m_private_full.csv
-```
-
-This file contains 4,500 private/blind predictions. The private file used here
-does not include a `success` label, so this is not a scored evaluation. It is a
-submission-style prediction file.
-
-Current prediction distribution:
+The local private/blind GGUF run used the repository's Few-Shot-style
+`BEST_PROMPT` and produced:
 
 | Prediction | Count | Rate |
 | --- | ---: | ---: |
 | SUCCESS | 333 | 7.4% |
 | FAILURE | 4167 | 92.6% |
 
-## Evaluation Method
+Because the private file has no labels, this is not a scored result.
 
-The public experiment runner:
+## Paper Files
 
-1. Loads `vcbench_final_public.csv`.
-2. Keeps `anonymised_prose`, `success`, and `industry`.
-3. Uses a stratified 80/20 split with `SEED = 42`.
-4. Samples a class-balanced validation subset when `--sample-size` is set.
-5. Runs one or more prompts.
-6. Parses the last `SUCCESS` or `FAILURE` token from the model output.
-7. Computes precision, recall, F0.5, TP, FP, FN, TN, and predicted-success
-   count.
-8. Appends metrics to the selected result CSV.
+- `PAPER_DRAFT_NEURIPS.md`: final Markdown paper draft.
+- `NEURIPS_REVIEW.md`: final review and readiness notes.
 
-The private/blind runner:
-
-1. Loads `vcbench_final_private.csv`.
-2. Uses all rows when `--sample-size 0`.
-3. Runs the imported `BEST_PROMPT`.
-4. Saves the original rows plus `prediction` and `model`.
-5. Computes metrics only if a `success` column is present.
-
-## Notes on the Draft Paper
-
-Two paper drafts were reviewed locally:
-
-- `VC_Bench-1.pdf`: earlier positive framing, arguing that Qwen3-32B nearly
-  closes the gap with DeepSeek-V3 through prompt engineering.
-- `VC_Bench-2.pdf`: stronger revised framing, arguing that prompt engineering
-  mostly exposes an overprediction/calibration failure on an imbalanced task.
-
-The second framing is more scientifically robust because it compares against
-trivial baselines and reports predicted-positive rate, not only F0.5.
-
-## Troubleshooting
-
-### `venv` points to a missing Python
-
-Use `.venv`, not `venv`:
-
-```powershell
-.\.venv\Scripts\python.exe --version
-```
-
-### Ollama connection refused
-
-Confirm Ollama is running:
-
-```powershell
-ollama list
-```
-
-Use:
-
-```text
-http://127.0.0.1:11434
-```
-
-instead of `localhost`.
-
-### Qwen prints reasoning despite no-thinking mode
-
-The wrappers already use both:
-
-```text
-/no_think
-```
-
-and:
-
-```json
-{"think": false}
-```
-
-If changing scripts manually, keep both.
-
-### Runs are too slow
-
-Start with:
-
-```powershell
-.\.venv\Scripts\python.exe run_experiments_ollama.py --sample-size 120 --prompts vanilla --skip-temp-sweep
-```
-
-Avoid `cot` and `hybrid` for first-pass local runs.
-
-### Result file appends old runs
-
-`run_experiments_ollama.py` appends metric rows to its result file. To isolate a
-new run, pass a new output path:
-
-```powershell
-.\.venv\Scripts\python.exe run_experiments_ollama.py --sample-size 120 --prompts vanilla --skip-temp-sweep --results-file results_new_run.csv
-```
+The LaTeX folder is ignored so the repository stays focused on reproducible code
+and final artifacts. If a LaTeX submission is needed later, rebuild it from the
+Markdown draft using the official conference template.
 
 ## Reproducibility Caveats
 
-- Local Ollama outputs can vary across model quantizations, hardware, Ollama
-  versions, and decoding settings.
-- Public validation results are based on small samples, often with only about 11
-  positive examples in a 120-row sample.
-- The private/blind file in this workspace does not expose labels, so the full
-  private output is a prediction file rather than a scored benchmark result.
-- The local GGUF model and the earlier `qwen3:32b` runs should not be mixed in a
-  paper table unless they are clearly identified as separate model settings.
+- The 120-sample LLM results contain only 11 positive examples.
+- Local Ollama results can vary with quantization, hardware, Ollama version, and
+  decoding settings.
+- The LLM CI script reconstructs hard-label vectors from summary counts for
+  rows where per-example predictions were not stored.
+- The private/blind prediction file is unscored because private labels are not
+  available in this workspace.
+- Hardware specifications for the local Ollama machine were not recoverable
+  from this environment and should be added in any formal submission.
 
-## Ethical Considerations
+## Ethical Note
 
 Founder-success prediction is a sensitive application. Models may over-weight
-prestige signals such as elite universities, large-company experience, geography,
-or prior access to capital. Any real deployment would require fairness auditing,
-human oversight, and careful limits on how predictions are used. The current
-experiments should be treated as benchmark research, not as a production VC
-screening system.
+prestige signals such as elite universities, prior big-tech employment,
+geography, or prior access to capital. This repository is benchmark research,
+not a deployable investment system. Any real use would require fairness audits,
+human oversight, calibration monitoring, and strict limits on automated
+decision-making.

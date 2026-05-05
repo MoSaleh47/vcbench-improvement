@@ -1,64 +1,82 @@
-import pandas as pd
-from sklearn.metrics import precision_score, accuracy_score, recall_score, fbeta_score
-import os
-import json
+"""Evaluate legacy JSON-style VCBench prediction files.
+
+The current final analysis uses the dedicated result CSVs and bootstrap script.
+This helper remains for older outputs produced under vanilla_llm_testing_results/.
+"""
+
+import argparse
 import ast
+import json
+from pathlib import Path
+
+import pandas as pd
+from sklearn.metrics import accuracy_score, fbeta_score, precision_score, recall_score
+
 
 def safe_eval(prediction_json):
-    # Remove '''json at the front and ''' at the back
-    if pd.isna(prediction_json) or prediction_json == None:
+    if pd.isna(prediction_json):
         return None
-    if prediction_json.startswith("```json\n"):
-        prediction_json = prediction_json[8:]  # Remove '''json
-    if prediction_json.endswith("\n```"):
-        prediction_json = prediction_json[:-4]  # Remove '''
-    try:
-        return ast.literal_eval(prediction_json)
-    except:
-        return json.loads(prediction_json) 
 
-        
-# Read the batch 1 predictions file
-for file in sorted(os.listdir("vanilla_llm_testing_results")):
-    df = pd.read_csv(os.path.join("vanilla_llm_testing_results", file))
-    
-    for index, row in df.iterrows():
-        prediction_json = safe_eval(row['prediction'])
-        if prediction_json == {} or pd.isna(prediction_json) or prediction_json == None:
-            print(row['founder_uuid'])
-            print(row['prediction'])
-            print("empty response")
+    text = str(prediction_json).strip()
+    if text.startswith("```json"):
+        text = text.removeprefix("```json").strip()
+    if text.endswith("```"):
+        text = text.removesuffix("```").strip()
+
+    try:
+        return ast.literal_eval(text)
+    except (SyntaxError, ValueError):
+        return json.loads(text)
+
+
+def evaluate_file(path: Path) -> dict:
+    df = pd.read_csv(path)
+    predictions = []
+
+    for _, row in df.iterrows():
+        parsed = safe_eval(row["prediction"])
+        if not parsed:
             prediction = "no"
         else:
-            prediction = prediction_json['prediction']
+            prediction = str(parsed.get("prediction", "no"))
 
-        
-    
-        if prediction.lower() == 'yes':
-            prediction_numeric = 1
-        elif prediction.lower() == 'no':
-            prediction_numeric = 0
+        if prediction.lower() == "yes":
+            predictions.append(1)
+        elif prediction.lower() == "no":
+            predictions.append(0)
         else:
-            raise Exception(f"Invalid prediction: {prediction}")
+            raise ValueError(f"Invalid prediction in {path.name}: {prediction}")
 
-        df.at[index, 'prediction_numeric'] = prediction_numeric
+    y_true = df["success"].astype(int)
+    return {
+        "file": path.name,
+        "n": len(df),
+        "precision": precision_score(y_true, predictions, zero_division=0),
+        "accuracy": accuracy_score(y_true, predictions),
+        "recall": recall_score(y_true, predictions, zero_division=0),
+        "f05": fbeta_score(y_true, predictions, beta=0.5, zero_division=0),
+        "pred_success": int(sum(predictions)),
+    }
 
-    # Calculate metrics using numeric predictions
-    precision = precision_score(df['success'], df['prediction_numeric'])
-    accuracy = accuracy_score(df['success'], df['prediction_numeric'])
-    recall = recall_score(df['success'], df['prediction_numeric'])
-    f_half_score = fbeta_score(df['success'], df['prediction_numeric'], beta=0.5)
 
-    print(f"Metrics for {file}:")
-    print(f"Precision: {precision:.4f}")
-    print(f"Accuracy: {accuracy:.4f}")
-    print(f"Recall: {recall:.4f}")
-    print(f"F_0.5 score: {f_half_score:.4f}")
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--results-dir", default="vanilla_llm_testing_results")
+    args = parser.parse_args()
 
-    # Print additional information
-    print(f"\nTotal 2samples analyzed: {len(df)}")
+    results_dir = Path(args.results_dir)
+    if not results_dir.exists():
+        print(f"No legacy result directory found: {results_dir}")
+        return
 
-    # Create a confusion matrix
-    confusion_matrix = pd.crosstab(df['success'], df['prediction_numeric'], rownames=['Actual'], colnames=['Predicted'])
-    print("\nConfusion Matrix:")
-    print(confusion_matrix)
+    rows = [evaluate_file(path) for path in sorted(results_dir.glob("*.csv"))]
+    if not rows:
+        print(f"No CSV files found in {results_dir}")
+        return
+
+    summary = pd.DataFrame(rows)
+    print(summary.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
+
+
+if __name__ == "__main__":
+    main()
