@@ -3,4 +3,7 @@ numpy
 pydantic
 pydantic-settings
 openai
+httpx
 scikit-learn
+python-dotenv
+tqdm

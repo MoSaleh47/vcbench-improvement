@@ -1,0 +1,3 @@
+time,experiment,prompt,temperature,f05,precision,recall,tp,fp,fn,tn,n_predicted_success,n_total
+19:32,few_shot | T=0.0,few_shot,0.0,0.1932,0.1633,0.7273,8,41,3,68,49,120
+19:39,vanilla | T=0.0,vanilla,0.0,0.2174,0.1923,0.4545,5,21,6,88,26,120

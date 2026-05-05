@@ -1,4 +1,14 @@
+.gitignore
 .env
 /venv/
+/.venv/
+/.pip-cache/
+/.tmp/
+/.uv-cache/
 __pycache__
 vanilla_llm_testing_results/
+vcbench_final_private.csv
+results_ollama_qwen3_30b_a3b_q4_k_m_private_full_20260504_234903.csv
+results_ollama_qwen3_30b_a3b_q4_k_m_private_full.csv
+results_ollama_qwen3_30b_a3b_q4_k_m_public_120.csv
+results_private_test.csv

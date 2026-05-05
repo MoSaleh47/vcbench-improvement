@@ -40,12 +40,14 @@ def load_data():
     )
 
     if SAMPLE_SIZE and SAMPLE_SIZE < len(val):
-        # Keep class balance in the sample
-        val = val.groupby("success", group_keys=False).apply(
-            lambda x: x.sample(
-                int(round(SAMPLE_SIZE * len(x) / len(val))), random_state=SEED
-            )
-        ).reset_index(drop=True)
+        # Keep class balance in the sample without relying on pandas groupby.apply
+        # preserving grouping columns.
+        sampled = []
+        for _, group in val.groupby("success"):
+            n = int(round(SAMPLE_SIZE * len(group) / len(val)))
+            if n:
+                sampled.append(group.sample(n=min(n, len(group)), random_state=SEED))
+        val = pd.concat(sampled).sample(frac=1, random_state=SEED).reset_index(drop=True)
 
     print(f"  Using        : {len(val)} profiles ({val['success'].sum()} successes, {(val['success']==0).sum()} failures)")
     return val.reset_index(drop=True)
